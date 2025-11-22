@@ -1,1 +1,278 @@
-{}
+{
+  "name": "Multi-Agent Content Factory",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "content-factory",
+        "options": {}
+      },
+      "id": "webhook-node",
+      "name": "Webhook: Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "prompt": "=You are a research agent. Produce a concise 200-word training brief about {{$json.query}} for African SMEs. Include 3 local statistics and 2 actionable tips.",
+        "model": {
+          "id": "gpt-3.5-turbo",
+          "name": "gpt-3.5-turbo"
+        },
+        "options": {
+          "temperature": 0.4
+        }
+      },
+      "id": "research-agent",
+      "name": "Research Agent",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "credentials": {
+        "openAiApi": {
+          "id": "OpenAi",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "prompt": "=You are a course writer. Turn the following research brief into a 5-slide lesson outline with a short quiz (one multiple-choice question per slide). Research: {{$json.output}}",
+        "model": {
+          "id": "gpt-3.5-turbo",
+          "name": "gpt-3.5-turbo"
+        },
+        "options": {
+          "temperature": 0.5
+        }
+      },
+      "id": "write-agent",
+      "name": "Write Agent",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "credentials": {
+        "openAiApi": {
+          "id": "OpenAi",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "prompt": "=You are an assessment agent. Create an answer key and 2 additional revision questions for the following lesson outline: {{$json.output}}",
+        "model": {
+          "id": "gpt-3.5-turbo",
+          "name": "gpt-3.5-turbo"
+        },
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "assess-agent",
+      "name": "Assessment Agent",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "credentials": {
+        "openAiApi": {
+          "id": "OpenAi",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.output}}",
+              "operation": "regex",
+              "value2": "(POPIA|data protection|privacy)"
+            }
+          ]
+        }
+      },
+      "id": "compliance-check",
+      "name": "POPIA Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "prompt": "=Add a one-sentence POPIA / data-protection disclaimer at the end of the lesson. Lesson: {{$json.output}}",
+        "model": {
+          "id": "gpt-3.5-turbo",
+          "name": "gpt-3.5-turbo"
+        }
+      },
+      "id": "append-compliance",
+      "name": "Append Disclaimer",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "credentials": {
+        "openAiApi": {
+          "id": "OpenAi",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "={{$parameter['sheetId']}}",
+        "range": "Courses!A:E",
+        "options": {
+          "valueInputMode": "USER_ENTERED"
+        },
+        "dataMapping": {
+          "mappingMode": "autoMap",
+          "schema": [],
+          "autoMapField": true
+        }
+      },
+      "id": "log-google-sheet",
+      "name": "Log to GoogleSheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "credentials": {
+        "googleApi": {
+          "id": "Google",
+          "name": "Google service account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$json.clientEmail || 'admin@addispos.com'}}",
+        "subject": "New training course ready",
+        "text": "Hello!\n\nYour course '{{$json.query}}' has been generated and logged.\n\nLesson outline:\n{{$json.output}}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "credentials": {
+        "smtp": {
+          "id": "SMTP",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingData",
+        "options": {
+          "responseData": "={{$json.output}}"
+        }
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook: Trigger": {
+      "main": [
+        [
+          {
+            "node": "Research Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research Agent": {
+      "main": [
+        [
+          {
+            "node": "Write Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Agent": {
+      "main": [
+        [
+          {
+            "node": "Assessment Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assessment Agent": {
+      "main": [
+        [
+          {
+            "node": "POPIA Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POPIA Check": {
+      "main": [
+        [
+          {
+            "node": "Append Disclaimer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log to GoogleSheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Disclaimer": {
+      "main": [
+        [
+          {
+            "node": "Log to GoogleSheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to GoogleSheet": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1a2b3c4d-5e6f-7890-abcd-ef1234567890",
+  "meta": {
+    "templateCredsSetup": true
+  }
+}
