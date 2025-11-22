@@ -1,1 +1,194 @@
-{}
+{
+  "name": "school_report",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "07-school-report",
+        "options": {}
+      },
+      "id": "0a1b2c3d-4e5f-4718-9a0b-c1d2e3f4a5b6",
+      "name": "webhookTrigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "functionCode": "// Transform Google Form payload to SA-SAMS row format\nconst out = [];\nfor (const it of items) {\n  const data = it.json;\n  // expected form fields: studentId, studentName, class, term, attendance, grades (JSON or CSV), parentPhone\n  const row = {\n    'Student Number': data.studentId || data.student_number || '',\n    'Surname': (data.studentName || '').split(' ').slice(-1).join(''),\n    'Initials': (data.studentName || '').split(' ').map(n=>n[0]||'').slice(0,-1).join(''),\n    'Grade': data.class || data.grade || '',\n    'Term': data.term || '',\n    'Attendance': data.attendance || '',\n    'Results': JSON.stringify(data.grades || {}),\n    'ParentPhone': data.parentPhone || data.phone || ''\n  };\n  // keep original fields for later nodes too\n  data.saSamsRow = row;\n  out.push({ json: data });\n}\nreturn out;"
+      },
+      "id": "1b2c3d4e-5f6a-4789-0b1c-2d3e4f5a6b7c",
+      "name": "transformToSASAMS",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "={{$parameter['sheetId']}}",
+        "range": "SA-SAMS!A:Z",
+        "options": {
+          "valueInputMode": "USER_ENTERED"
+        },
+        "dataMapping": {
+          "mappingMode": "manual",
+          "schema": [
+            { "key": "StudentNumber", "value": "={{$json.saSamsRow['Student Number'] || ''}}" },
+            { "key": "Surname", "value": "={{$json.saSamsRow['Surname'] || ''}}" },
+            { "key": "Initials", "value": "={{$json.saSamsRow['Initials'] || ''}}" },
+            { "key": "Grade", "value": "={{$json.saSamsRow['Grade'] || ''}}" },
+            { "key": "Term", "value": "={{$json.saSamsRow['Term'] || ''}}" },
+            { "key": "Attendance", "value": "={{$json.saSamsRow['Attendance'] || ''}}" },
+            { "key": "Results", "value": "={{$json.saSamsRow['Results'] || ''}}" },
+            { "key": "ParentPhone", "value": "={{$json.saSamsRow['ParentPhone'] || ''}}" }
+          ],
+          "autoMapField": false
+        }
+      },
+      "id": "2c3d4e5f-6a7b-4890-1c2d-3e4f5a6b7c8d",
+      "name": "appendSASAMS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "credentials": {
+        "googleApi": {
+          "id": "Google",
+          "name": "Google service account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Create a simple PDF report as binary data (placeholder)\nconst out = [];\nfor (const it of items) {\n  const d = it.json;\n  const text = `School Report\nStudent: ${d.studentName || ''} (${d.studentId || ''})\nClass: ${d.class || d.grade || ''} Term: ${d.term || ''}\nAttendance: ${d.attendance || ''}\nResults: ${d.grades ? JSON.stringify(d.grades) : (d.saSamsRow && d.saSamsRow.Results) || ''}`;\n  const buf = Buffer.from(text, 'utf8');\n  it.binary = it.binary || {};\n  it.binary.reportPdf = { data: buf.toString('base64'), fileName: `report_${d.studentId || Date.now()}.pdf`, mimeType: 'application/pdf' };\n  out.push(it);\n}\nreturn out;"
+      },
+      "id": "3d4e5f6a-7b8c-4901-2d3e-4f5a6b7c8d9e",
+      "name": "generatePdf",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "binaryPropertyName": "reportPdf",
+        "fileName": "={{ `school_report_${$json.studentId || Date.now()}.pdf` }}",
+        "parents": "={{$parameter['folderId'] || ''}}"
+      },
+      "id": "4e5f6a7b-8c9d-4012-3e4f-5a6b7c8d9e0f",
+      "name": "savePdf",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 1,
+      "credentials": {
+        "googleApi": {
+          "id": "Google",
+          "name": "Google service account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://whatsapp-sandbox.example/api/send",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ { to: ($json.parentPhone || $json.saSamsRow?.ParentPhone || ''), mediaUrl: $node[\"savePdf\"].json.webViewLink || $node[\"savePdf\"].json.id || '', caption: 'School report for ' + ($json.studentName || '') } }}"
+      },
+      "id": "5f6a7b8c-9d0e-4123-4f5a-6b7c8d9e0f1a",
+      "name": "sendWhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "WhatsApp",
+          "name": "WhatsApp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingData",
+        "options": {
+          "responseData": "={{ { status: 'sent', studentId: $json.studentId || null } }}"
+        }
+      },
+      "id": "6a7b8c9d-0e1f-5234-5a6b-7c8d9e0f1a2b",
+      "name": "respondWebhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "webhookTrigger": {
+      "main": [
+        [
+          {
+            "node": "transformToSASAMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "transformToSASAMS": {
+      "main": [
+        [
+          {
+            "node": "appendSASAMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "appendSASAMS": {
+      "main": [
+        [
+          {
+            "node": "generatePdf",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "generatePdf": {
+      "main": [
+        [
+          {
+            "node": "savePdf",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "savePdf": {
+      "main": [
+        [
+          {
+            "node": "sendWhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "sendWhatsApp": {
+      "main": [
+        [
+          {
+            "node": "respondWebhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "07-school-report-0001",
+  "meta": {
+    "templateCredsSetup": true
+  }
+}
+

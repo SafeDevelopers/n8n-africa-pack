@@ -1,1 +1,188 @@
-{}
+{
+  "name": "bbbee_gen",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "06-bbbee",
+        "options": {}
+      },
+      "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+      "name": "webhookTrigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "=https://accounting-sandbox.example/api/metrics?companyId={{$json.companyId || $json.company_id}}",
+        "method": "GET",
+        "responseFormat": "json",
+        "options": {}
+      },
+      "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+      "name": "fetchAccountingMetrics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "Accounting",
+          "name": "Accounting"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const out = [];\nfor (const it of items) {\n  const data = Object.assign({}, it.json);\n  // Map accounting metrics to B-BBEE scorecard fields (example placeholders)\n  const metrics = data.metrics || data;\n  const scorecard = {\n    ownership: metrics.blackOwnershipPercent || 0,\n    managementControl: metrics.managementControl || 0,\n    skillsDevelopment: metrics.skillsDevSpend || 0,\n    enterpriseDevelopment: metrics.enterpriseDev || 0,\n    socioEconomicDevelopment: metrics.sed || 0\n  };\n  data.scorecard = scorecard;\n  out.push({ json: data });\n}\nreturn out;"
+      },
+      "id": "c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f",
+      "name": "mapFields",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": "={{$parameter['templateFileId']}}",
+        "binaryPropertyName": "templatePdf"
+      },
+      "id": "d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f80",
+      "name": "getTemplate",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 1,
+      "credentials": {
+        "googleApi": {
+          "id": "Google",
+          "name": "Google service account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "templateBinaryPropertyName": "templatePdf",
+        "fields": {
+          "mappingMode": "manual",
+          "values": [
+            { "field": "Ownership%", "value": "={{$json.scorecard?.ownership || 0}}" },
+            { "field": "ManagementControl%", "value": "={{$json.scorecard?.managementControl || 0}}" },
+            { "field": "SkillsDevelopmentZAR", "value": "={{$json.scorecard?.skillsDevelopment || 0}}" },
+            { "field": "EnterpriseDevelopmentZAR", "value": "={{$json.scorecard?.enterpriseDevelopment || 0}}" },
+            { "field": "SEDZAR", "value": "={{$json.scorecard?.socioEconomicDevelopment || 0}}" }
+          ]
+        },
+        "outputBinaryPropertyName": "filledPdf"
+      },
+      "id": "e5f6a7b8-c9d0-4e1f-2a3b-4c5d6e7f8091",
+      "name": "pdfFiller",
+      "type": "n8n-nodes-base.pdfFiller",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$json.auditEmail || $json.clientEmail || 'auditor@company.com'}}",
+        "subject": "={{ `B-BBEE scorecard for ${$json.companyName || $json.company || ''}` }}",
+        "text": "Please find attached the populated B-BBEE scorecard.",
+        "binaryPropertyName": "filledPdf",
+        "options": {}
+      },
+      "id": "f6a7b8c9-d0e1-4f2a-3b4c-5d6e7f8091a2",
+      "name": "sendEmail",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "credentials": {
+        "smtp": {
+          "id": "SMTP",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingData",
+        "options": {
+          "responseData": "={{ { status: 'completed', companyId: $json.companyId || null } }}"
+        }
+      },
+      "id": "07a8b9c0-d1e2-4f3a-5b6c-7d8e9f0a1b2c",
+      "name": "respondWebhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "webhookTrigger": {
+      "main": [
+        [
+          {
+            "node": "fetchAccountingMetrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fetchAccountingMetrics": {
+      "main": [
+        [
+          {
+            "node": "mapFields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "mapFields": {
+      "main": [
+        [
+          {
+            "node": "getTemplate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "getTemplate": {
+      "main": [
+        [
+          {
+            "node": "pdfFiller",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "pdfFiller": {
+      "main": [
+        [
+          {
+            "node": "sendEmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "sendEmail": {
+      "main": [
+        [
+          {
+            "node": "respondWebhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "06-bbbee-0001",
+  "meta": {
+    "templateCredsSetup": true
+  }
+}
+

@@ -1,1 +1,238 @@
-{}
+{
+  "name": "minigrid_recon",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": [
+          {
+            "item": {
+              "type": "cron",
+              "value": "0 2 * * *"
+            }
+          }
+        ]
+      },
+      "id": "a8f1b2c3-d4e5-4789-81a2-b3c4d5e6f701",
+      "name": "dailySchedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{$parameter['csvUrl']}}",
+        "method": "GET",
+        "responseFormat": "string",
+        "options": {}
+      },
+      "id": "b9e2c3d4-f5a6-4890-82b3-c4d5e6f70112",
+      "name": "fetchCsv",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "binaryPropertyName": "",
+        "options": {
+          "rawCSV": true,
+          "delimiter": ",",
+          "headerRow": true
+        }
+      },
+      "id": "c0f3d4e5-a6b7-4891-83c4-d5e6f7011233",
+      "name": "parseCsv",
+      "type": "n8n-nodes-base.spreadsheetFileToJson",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "sheetId": "={{$parameter['sheetId']}}",
+        "range": "Ledger!A:Z",
+        "options": {}
+      },
+      "id": "d1f4e5f6-a7b8-4a92-84d5-e6f701123344",
+      "name": "getLedger",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "credentials": {
+        "googleApi": {
+          "id": "Google",
+          "name": "Google service account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const statement = items.map(i=>i.json);\nconst ledger = $node[\"getLedger\"].json || [];\nconst out = [];\nfor (const row of statement) {\n  const r = Object.assign({}, row);\n  const amount = parseFloat(r.amount || r.Amount || r.value || 0) || 0;\n  // attempt to find ledger match by reference, customer or exact amount\n  const match = ledger.find(l => {\n    const la = parseFloat(l.amount || l.Amount || 0) || 0;\n    if (la && Math.abs(la - amount) < 0.01) return true;\n    if (l.reference && r.reference && l.reference == r.reference) return true;\n    if (l.customer && r.customer && l.customer == r.customer) return true;\n    return false;\n  });\n  const ledgerAmount = match ? (parseFloat(match.amount || match.Amount || 0) || 0) : 0;\n  const variance = ledgerAmount ? (Math.abs(amount - ledgerAmount) / ledgerAmount) * 100 : (amount === 0 ? 0 : 100);\n  r.ledgerMatched = !!match;\n  r.ledgerReference = match ? (match.reference || '') : '';\n  r.ledgerAmount = ledgerAmount;\n  r.variancePercent = Math.round(variance * 100) / 100;\n  out.push({ json: r });\n}\nreturn out;"
+      },
+      "id": "e2f5g6h7-a8b9-4b93-85e6-f70112334455",
+      "name": "matchStatement",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.variancePercent }}",
+              "operation": "isGreaterThan",
+              "value2": 5
+            }
+          ]
+        }
+      },
+      "id": "f3g6h7i8-b9c0-4c94-86f7-012233445566",
+      "name": "varianceCheck",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$parameter['alertEmail'] || 'ops@addispos.com'}}",
+        "subject": "Reconciliation variance alert: {{$json.reference || $json.customer || 'item'}}",
+        "text": "A variance of {{$json.variancePercent}}% was detected for reference {{$json.reference || $json.customer}} (statement amount: {{$json.amount}}, ledger amount: {{$json.ledgerAmount}}).",
+        "options": {}
+      },
+      "id": "g4h7i8j9-c0d1-4d95-87g8-123344556677",
+      "name": "sendAlert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "credentials": {
+        "smtp": {
+          "id": "SMTP",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "={{$parameter['sheetId']}}",
+        "range": "Reconciliation!A:K",
+        "options": {
+          "valueInputMode": "USER_ENTERED"
+        },
+        "dataMapping": {
+          "mappingMode": "manual",
+          "schema": [
+            { "key": "reference", "value": "={{$json.reference || $json.customer || ''}}" },
+            { "key": "statementAmount", "value": "={{$json.amount || 0}}" },
+            { "key": "ledgerAmount", "value": "={{$json.ledgerAmount || 0}}" },
+            { "key": "variancePercent", "value": "={{$json.variancePercent || 0}}" },
+            { "key": "matched", "value": "={{$json.ledgerMatched ? 'yes' : 'no'}}" },
+            { "key": "timestamp", "value": "={{ new Date().toISOString() }}" }
+          ],
+          "autoMapField": false
+        }
+      },
+      "id": "h5i8j9k0-d1e2-4e96-88h9-234455667788",
+      "name": "appendLog",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "credentials": {
+        "googleApi": {
+          "id": "Google",
+          "name": "Google service account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "dailySchedule": {
+      "main": [
+        [
+          {
+            "node": "fetchCsv",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fetchCsv": {
+      "main": [
+        [
+          {
+            "node": "parseCsv",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parseCsv": {
+      "main": [
+        [
+          {
+            "node": "getLedger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "getLedger": {
+      "main": [
+        [
+          {
+            "node": "matchStatement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "matchStatement": {
+      "main": [
+        [
+          {
+            "node": "varianceCheck",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "varianceCheck": {
+      "main": [
+        [
+          {
+            "node": "appendLog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "true": [
+        [
+          {
+            "node": "sendAlert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "appendLog": {
+      "main": [
+        [
+          {
+            "node": "sendAlert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "08-minigrid-recon-0001",
+  "meta": {
+    "templateCredsSetup": true
+  }
+}
+

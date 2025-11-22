@@ -1,17 +1,17 @@
 <template>
-  <button @click="trigger">Trigger Workflow</button>
+  <h2>Run a workflow</h2>
+  <input v-model="query" placeholder="course topic">
+  <button @click="fire">Generate course</button>
+  <pre>{{ resp }}</pre>
 </template>
 
-<script>
-import { triggerWorkflow } from '../api'
-export default {
-  props: { id: { type: String, required: true } },
-  methods: {
-    trigger() { triggerWorkflow(this.id, {}).then(() => alert('Triggered')) }
-  }
+<script setup>
+import { ref } from 'vue'
+import { trigger } from '../api.js'
+const query = ref('')
+const resp = ref('')
+const fire = async () => {
+  const { data } = await trigger('content-factory', { query: query.value })
+  resp.value = data
 }
 </script>
-
-<style scoped>
-button { padding: 0.4rem 0.8rem; border-radius: 6px }
-</style>

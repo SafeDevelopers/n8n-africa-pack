@@ -1,1 +1,157 @@
-{}
+{
+  "name": "wc_fulfil",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "03-woo-fulfil",
+        "options": {}
+      },
+      "id": "3f8b1c2e-9d6a-4f2b-8b6e-1a2c3d4e5f60",
+      "name": "webhookTrigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "https://courier-sandbox.example/api/create-waybill",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ { orderId: $json.id || $json.order_id, items: $json.line_items, shipping: $json.shipping, customer: { name: $json.billing?.first_name + ' ' + $json.billing?.last_name, phone: $json.billing?.phone, email: $json.billing?.email } } }}"
+      },
+      "id": "7a6b5c4d-3e2f-4a1b-9c8d-0e1f2a3b4c5d",
+      "name": "createWaybill",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "Courier",
+          "name": "Courier"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://sms-gateway-sandbox.example/api/send",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ { to: ($json.shipping?.phone || $json.billing?.phone || ($json.customer?.phone || '')), message: (`Your order ${$json.id || $json.order_id} has been shipped. Tracking: ${$node[\"createWaybill\"].json.tracking || ''}`) } }}"
+      },
+      "id": "9b8c7d6e-5f4a-4b3c-8d7e-6f5a4b3c2d1e",
+      "name": "sendSms",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SMS",
+          "name": "SMS"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "={{$parameter['sheetId']}}",
+        "range": "Settlements!A:K",
+        "options": {
+          "valueInputMode": "USER_ENTERED"
+        },
+        "dataMapping": {
+          "mappingMode": "manual",
+          "schema": [
+            { "key": "orderId", "value": "={{$json.id || $json.order_id}}" },
+            { "key": "courier", "value": "={{$node[\"createWaybill\"].json.courier || ''}}" },
+            { "key": "tracking", "value": "={{$node[\"createWaybill\"].json.tracking || ''}}" },
+            { "key": "customer", "value": "={{($json.billing?.first_name || '') + ' ' + ($json.billing?.last_name || '')}}" },
+            { "key": "phone", "value": "={{$json.billing?.phone || ''}}" },
+            { "key": "amount", "value": "={{$json.total || $json.total_price || ''}}" },
+            { "key": "paymentMethod", "value": "={{$json.payment_method || ''}}" },
+            { "key": "settlementChannel", "value": "={{$json.payment_method || ''}}" },
+            { "key": "status", "value": "={{$node[\"createWaybill\"].json.status || 'shipped'}}" },
+            { "key": "timestamp", "value": "={{ $now || new Date().toISOString() }}" }
+          ],
+          "autoMapField": false
+        }
+      },
+      "id": "1c2d3e4f-5a6b-4789-9abc-0def12345678",
+      "name": "appendSettlementSheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "credentials": {
+        "googleApi": {
+          "id": "Google",
+          "name": "Google service account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingData",
+        "options": {
+          "responseData": "={{ { status: 'ok', orderId: $json.id || $json.order_id, tracking: $node[\"createWaybill\"].json.tracking || '' } }}"
+        }
+      },
+      "id": "2d3e4f5a-6b7c-4810-abcd-1234567890ab",
+      "name": "respondWebhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "webhookTrigger": {
+      "main": [
+        [
+          {
+            "node": "createWaybill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "createWaybill": {
+      "main": [
+        [
+          {
+            "node": "sendSms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "sendSms": {
+      "main": [
+        [
+          {
+            "node": "appendSettlementSheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "appendSettlementSheet": {
+      "main": [
+        [
+          {
+            "node": "respondWebhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "03-wc-fulfil-0001",
+  "meta": {
+    "templateCredsSetup": true
+  }
+}
+

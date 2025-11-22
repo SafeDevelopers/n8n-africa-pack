@@ -1,1 +1,260 @@
-{}
+{
+  "name": "payroll_sars",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "02-payroll",
+        "options": {}
+      },
+      "id": "e2b7a1b0-8c4a-4f57-9c1a-2b3d4e5f6a70",
+      "name": "webhookTrigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{$json.csvUrl}}",
+        "method": "GET",
+        "responseFormat": "string",
+        "options": {}
+      },
+      "id": "a1d2c3b4-5e6f-4789-abcd-111213141516",
+      "name": "fetchCsv",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "binaryPropertyName": "",
+        "options": {
+          "rawCSV": true,
+          "delimiter": ",",
+          "headerRow": true
+        }
+      },
+      "id": "b2c3d4e5-f6a7-4890-abcd-212223242526",
+      "name": "spreadsheetFileToJson",
+      "type": "n8n-nodes-base.spreadsheetFileToJson",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "functionCode": "const returnData = [];\nconst rows = items;\nconst total = rows.length;\nfor (const it of rows) {\n  const data = it.json;\n  const salary = parseFloat(data.salary || data.gross || data.amount || 0) || 0;\n  // Simplified 2025 PAYE/UIF calculation (placeholder)\n  const uif = Math.round((salary * 0.01) * 100) / 100;\n  const paye = Math.round((salary * 0.18) * 100) / 100;\n  const net = Math.round((salary - paye - uif) * 100) / 100;\n  data.paye = paye;\n  data.uif = uif;\n  data.net = net;\n  data.rowCount = total;\n  returnData.push({ json: data });\n}\nreturn returnData;"
+      },
+      "id": "c3d4e5f6-a7b8-4c90-abcd-313233343536",
+      "name": "calculateTaxes",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.paye }}",
+              "operation": "isGreaterThan",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "d4e5f6a7-b8c9-4d90-abcd-414243444546",
+      "name": "taxCheck",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "https://www.sarsefiling.co.za/api/submit",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ { month: $json.month, employee: $json } }}"
+      },
+      "id": "e5f6a7b8-c9d0-4e90-abcd-515253545556",
+      "name": "sarsSubmit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SARS",
+          "name": "SARS"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "={{$parameter['sheetId']}}",
+        "range": "PayrollLog!A:K",
+        "options": {
+          "valueInputMode": "USER_ENTERED"
+        },
+        "dataMapping": {
+          "mappingMode": "manual",
+          "schema": [
+            { "key": "employeeId", "value": "={{$json.employeeId || $json.id || $json.empId || ''}}" },
+            { "key": "name", "value": "={{$json.name || $json.fullName || ''}}" },
+            { "key": "month", "value": "={{$json.month || $json._month || ''}}" },
+            { "key": "gross", "value": "={{$json.salary || $json.gross || 0}}" },
+            { "key": "paye", "value": "={{$json.paye || 0}}" },
+            { "key": "uif", "value": "={{$json.uif || 0}}" },
+            { "key": "net", "value": "={{$json.net || 0}}" },
+            { "key": "sarsStatus", "value": "={{$json.sarsStatus || ''}}" },
+            { "key": "email", "value": "={{$json.email || $json.clientEmail || ''}}" },
+            { "key": "rowCount", "value": "={{$json.rowCount || 0}}" }
+          ],
+          "autoMapField": false
+        }
+      },
+      "id": "f6a7b8c9-d0e1-4f90-abcd-616263646566",
+      "name": "appendGoogleSheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "credentials": {
+        "googleApi": {
+          "id": "Google",
+          "name": "Google service account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$json.clientEmail || $json.email || 'finance@addispos.com'}}",
+        "subject": "={{ `Payslips & SARS submission for ${$json.month || $json._month || ''}` }}",
+        "text": "Please find attached the payslips for {{$json.month}}.",
+        "binaryPropertyName": "payslipCsv",
+        "options": {}
+      },
+      "id": "07a8b9c0-d1e2-4a90-abcd-717273747576",
+      "name": "sendEmail",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "credentials": {
+        "smtp": {
+          "id": "SMTP",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingData",
+        "options": {
+          "responseData": "={{ { status: 'submitted', rows: $json.rowCount || 0 } }}"
+        }
+      },
+      "id": "18b9c0d1-e2f3-4b90-abcd-818283848586",
+      "name": "respondWebhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "webhookTrigger": {
+      "main": [
+        [
+          {
+            "node": "fetchCsv",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fetchCsv": {
+      "main": [
+        [
+          {
+            "node": "spreadsheetFileToJson",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "spreadsheetFileToJson": {
+      "main": [
+        [
+          {
+            "node": "calculateTaxes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "calculateTaxes": {
+      "main": [
+        [
+          {
+            "node": "taxCheck",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "taxCheck": {
+      "main": [
+        [
+          {
+            "node": "sarsSubmit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "appendGoogleSheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "sarsSubmit": {
+      "main": [
+        [
+          {
+            "node": "appendGoogleSheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "appendGoogleSheet": {
+      "main": [
+        [
+          {
+            "node": "sendEmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "sendEmail": {
+      "main": [
+        [
+          {
+            "node": "respondWebhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "02-payroll-sars-0001",
+  "meta": {
+    "templateCredsSetup": true
+  }
+}
+

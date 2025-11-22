@@ -1,1 +1,186 @@
-{}
+{
+  "name": "tele_triage",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "09-triage",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "w1a2b3c4-d5e6-4001-9001-111213141501",
+      "name": "webhookTrigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "functionCode": "// Build a simple FHIR Patient record from incoming WhatsApp webhook payload\nconst payload = items[0].json || {};\n// common WhatsApp fields: from, body/text, name, dob, symptoms (may vary by provider)\nconst raw = payload.body || payload.text || payload.message || payload.payload || {};\nconst phone = payload.from || raw.from || raw.phone || (payload.fromNumber || null) || null;\nconst name = raw.name || payload.name || null;\nconst dob = raw.dob || payload.dob || null;\nconst symptoms = raw.symptoms || raw.text || raw.body || null;\nconst fhirPatient = {\n  resourceType: 'Patient',\n  name: name ? [{ text: name }] : [],\n  telecom: phone ? [{ system: 'phone', value: phone, use: 'mobile' }] : [],\n  birthDate: dob || undefined,\n  extension: symptoms ? [{ url: 'http://addispos.org/fhir/StructureDefinition/symptoms', valueString: String(symptoms) }] : []\n};\n// Attach a basic Appointment stub so we can pass structured data downstream\nconst appointmentRequest = {\n  preferredDurationMinutes: 30,\n  preferredWindowStartDays: 1\n};\nreturn [{ json: { fhirPatient, appointmentRequest, phone, symptoms } }];"
+      },
+      "id": "f2b3c4d5-e6f7-4112-9002-222324252602",
+      "name": "buildFHIR",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "freeBusyQuery",
+        "resource": {
+          "items": [
+            {
+              "id": "={{$parameter['doctorCalendarId'] || 'doctor@example.com'}}"
+            }
+          ],
+          "timeMin": "={{ new Date().toISOString() }}",
+          "timeMax": "={{ new Date(new Date().getTime() + 7*24*60*60*1000).toISOString() }}"
+        }
+      },
+      "id": "g3c4d5e6-f7a8-4223-9003-333435363703",
+      "name": "findFreeSlot",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "credentials": {
+        "googleApi": {
+          "id": "Google",
+          "name": "Google service account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Select a simple next available slot based on freeBusy response or fallback to next morning at 09:00\nconst fb = $node['findFreeSlot'].json;\nconst now = new Date();\n// default slot: tomorrow at 09:00 for 30 minutes\nconst defaultStart = new Date(now); defaultStart.setDate(defaultStart.getDate() + 1); defaultStart.setHours(9,0,0,0);\nconst defaultEnd = new Date(defaultStart.getTime() + 30*60000);\nlet chosen = { start: defaultStart.toISOString(), end: defaultEnd.toISOString() };\ntry {\n  // google freeBusy returns 'calendars' map with 'busy' arrays; find first day with a gap\n  const calendars = fb.calendars || fb.calendar || fb;\n  if (calendars && typeof calendars === 'object') {\n    const cal = Object.values(calendars)[0];\n    const busy = cal && cal.busy ? cal.busy : [];\n    // if no busy times, pick defaultStart\n    if (busy.length === 0) {\n      chosen = { start: defaultStart.toISOString(), end: defaultEnd.toISOString() };\n    } else {\n      // attempt to find a gap of 30min after now within next 7 days; simplistic approach:\n      let cursor = new Date();\n      for (let i=0;i<7;i++) {\n        const dayStart = new Date(cursor); dayStart.setHours(9,0,0,0);\n        const dayEnd = new Date(cursor); dayEnd.setHours(17,0,0,0);\n        // check busy intervals for this day\n        const busyForDay = busy.filter(b => {\n          const s = new Date(b.start);\n          return s >= dayStart && s < dayEnd;\n        });\n        if (busyForDay.length < ((dayEnd - dayStart)/(30*60000))) {\n          // assume there is at least one 30m free slot at 09:00 or after last busy\n          let candidate = new Date(dayStart);\n          // move candidate after the last busy end of the day if needed\n          if (busyForDay.length) {\n            const last = new Date(busyForDay[busyForDay.length-1].end);\n            candidate = new Date(last.getTime() + 5*60000); // 5 min buffer\n            if (candidate.getHours() < 9) candidate.setHours(9,0,0,0);\n          }\n          chosen = { start: candidate.toISOString(), end: new Date(candidate.getTime() + 30*60000).toISOString() };\n          break;\n        }\n        cursor.setDate(cursor.getDate()+1);\n      }\n    }\n  }\n} catch(err) { /* fallback to default */ }\n// pass chosen appointment forward\nreturn [{ json: { appointment: chosen, patient: $json.fhirPatient, phone: $json.phone, symptoms: $json.symptoms } }];"
+      },
+      "id": "h4d5e6f7-a8b9-4334-9004-444546474804",
+      "name": "selectSlot",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "calendarId": "={{$parameter['doctorCalendarId'] || 'doctor@example.com'}}",
+        "summary": "Tele-triage appointment: {{$json.patient.name && $json.patient.name[0] ? $json.patient.name[0].text : 'Patient'}}",
+        "description": "Symptoms: {{$json.symptoms || 'not provided'}}\nSource: WhatsApp triage",
+        "start": "={{$json.appointment.start}}",
+        "end": "={{$json.appointment.end}}",
+        "options": {}
+      },
+      "id": "i5e6f7g8-b9c0-4445-9005-555657585905",
+      "name": "createEvent",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "credentials": {
+        "googleApi": {
+          "id": "Google",
+          "name": "Google service account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$parameter['smsGatewayUrl'] || 'https://sms-gateway.example/send'}}",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={ \n+  \"to\": $json.phone,\n+  \"message\": `Your appointment is booked for ${$json.appointment.start} to ${$json.appointment.end}. Reply if you need to cancel.`\n+ }"
+      },
+      "id": "j6f7g8h9-c0d1-4556-9006-666768798006",
+      "name": "sendSms",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SMS",
+          "name": "SMS gateway"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "responseCode": 200,
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "k7g8h9i0-d1e2-4667-9007-777879808107",
+      "name": "respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "webhookTrigger": {
+      "main": [
+        [
+          {
+            "node": "buildFHIR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "buildFHIR": {
+      "main": [
+        [
+          {
+            "node": "findFreeSlot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "findFreeSlot": {
+      "main": [
+        [
+          {
+            "node": "selectSlot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "selectSlot": {
+      "main": [
+        [
+          {
+            "node": "createEvent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "createEvent": {
+      "main": [
+        [
+          {
+            "node": "sendSms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "sendSms": {
+      "main": [
+        [
+          {
+            "node": "respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "09-tele-triage-0001",
+  "meta": {
+    "templateCredsSetup": true
+  }
+}
+

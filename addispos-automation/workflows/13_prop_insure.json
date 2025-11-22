@@ -1,0 +1,194 @@
+{
+  "name": "prop_insure",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "13-prop-insure",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "p1a2b3c4-d5e6-4001-9001-131415161301",
+      "name": "webhookTrigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{`https://land-registry.example/api/pdf/${$json.propertyId}`}}",
+        "method": "GET",
+        "responseFormat": "arrayBuffer",
+        "options": {},
+        "headerParametersJson": "={ \"Authorization\": `Bearer ${$env.LAND_API_KEY}` }"
+      },
+      "id": "p2b3c4d5-e6f7-4112-9002-141516171302",
+      "name": "fetchTitlePdf",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "p3c4d5e6-f7a8-4223-9003-151617181303",
+      "name": "extractPdf",
+      "type": "n8n-nodes-base.pdfExtract",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "functionCode": "// Verify owner from extracted PDF text and incoming buyerId\nconst pdfText = items[0].json.text || items[0].json.plainText || '';\nconst buyerId = $json.buyerId || $input.all()[0].json.buyerId || '';\n// naive check: presence of buyerId or name in pdf text (replace with robust logic in production)\nconst ownerVerified = pdfText.includes(buyerId) || /Owner|Registered owner/i.test(pdfText);\nreturn [{ json: { ownerVerified, pdfTextSnippet: pdfText.slice(0,400), propertyId: $input.all()[0].json.propertyId || $json.propertyId } }];"
+      },
+      "id": "p4d5e6f7-a8b9-4334-9004-161718191304",
+      "name": "verifyOwner",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{`https://credit-bureau.example/api/check/${$json.buyerId}`}}",
+        "method": "GET",
+        "responseFormat": "json",
+        "options": {},
+        "headerParametersJson": "={ \"Authorization\": `Bearer ${$env.CREDIT_BUREAU_TOKEN}` }"
+      },
+      "id": "p5e6f7g8-b9c0-4445-9005-171819201305",
+      "name": "creditCheck",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            { "value1": "={{ $node['creditCheck'].json.score || $json.score || 0 }}", "operation": "isGreaterThan", "value2": 600 }
+          ]
+        }
+      },
+      "id": "p6f7g8h9-c0d1-4556-9006-181920212306",
+      "name": "scoreCheck",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "prompt": "Generate a mortgage offer letter for buyer {{$json.buyerId}} purchasing property {{$json.propertyId}} at price {{$json.purchasePrice}}. Include terms, repayment schedule outline and next steps.",
+        "options": {}
+      },
+      "id": "p7g8h9i0-d1e2-4667-9007-192021222307",
+      "name": "generateOffer",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "credentials": {
+        "openAiApi": { "id": "OpenAi", "name": "OpenAI" }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$parameter['insuranceBaseUrl'] || $env.INSURANCE_BASE_URL || 'https://insurance.example/quote'}}",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={ \"propertyId\": $json.propertyId, \"purchasePrice\": $json.purchasePrice }",
+        "headerParametersJson": "={ \"Authorization\": `Bearer ${$env.INSURANCE_TOKEN || ''}` }"
+      },
+      "id": "p8h9i0j1-e2f3-4778-9008-202122232308",
+      "name": "getInsuranceQuote",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "p9i0j1k2-f3g4-4889-9009-212223242309",
+      "name": "saveTitleToDrive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 1,
+      "credentials": {
+        "googleApi": { "id": "Google", "name": "Google service account" }
+      }
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$json.email || $input.all()[0].json.email}}",
+        "subject": "Mortgage offer for property {{$json.propertyId}}",
+        "text": "Dear buyer, please find your mortgage offer attached. Offer summary: {{$node['generateOffer'].json.choices ? $node['generateOffer'].json.choices[0].text : $node['generateOffer'].json.text || 'See attached'}}",
+        "options": {}
+      },
+      "id": "q1j2k3l4-g5h6-4990-9010-222324252310",
+      "name": "sendEmail",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "credentials": {
+        "smtp": { "id": "SMTP", "name": "SMTP account" }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$parameter['whatsApiUrl'] || 'https://whatsapp-api.example/send'}}",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={ \"to\": $json.buyerId || $json.phone || '', \"message\": `Your mortgage offer for ${$json.propertyId} has been emailed to ${$json.email}.` }"
+      },
+      "id": "q2k3l4m5-h6i7-5001-9011-232425262311",
+      "name": "sendWhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "={{$parameter['GOOGLE_SHEETS_PROP_ID'] || $env.GOOGLE_SHEETS_PROP_ID || $parameter.sheetId}}",
+        "range": "Log!A:F",
+        "options": { "valueInputMode": "USER_ENTERED" },
+        "dataMapping": {
+          "mappingMode": "manual",
+          "schema": [
+            { "key": "propertyId", "value": "={{$json.propertyId}}" },
+            { "key": "buyerId", "value": "={{$json.buyerId}}" },
+            { "key": "offerSent", "value": "=true" },
+            { "key": "creditScore", "value": "={{$node['creditCheck'].json.score || $json.score || ''}}" },
+            { "key": "insuranceQuote", "value": "={{$node['getInsuranceQuote'].json.quote || ''}}" },
+            { "key": "timestamp", "value": "={{ new Date().toISOString() }}" }
+          ],
+          "autoMapField": false
+        }
+      },
+      "id": "q3l4m5n6-i7j8-5112-9012-242526272312",
+      "name": "appendLog",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "credentials": { "googleApi": { "id": "Google", "name": "Google service account" } }
+    },
+    {
+      "parameters": { "responseCode": 200, "responseMode": "lastNode", "options": {} },
+      "id": "q4m5n6o7-j8k9-5223-9013-252627282313",
+      "name": "respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "webhookTrigger": { "main": [ [ { "node": "fetchTitlePdf", "type": "main", "index": 0 } ] ] },
+    "fetchTitlePdf": { "main": [ [ { "node": "extractPdf", "type": "main", "index": 0 } ] ] },
+    "extractPdf": { "main": [ [ { "node": "verifyOwner", "type": "main", "index": 0 } ] ] },
+    "verifyOwner": { "main": [ [ { "node": "creditCheck", "type": "main", "index": 0 } ] ] },
+    "creditCheck": { "main": [ [ { "node": "scoreCheck", "type": "main", "index": 0 } ] ] },
+    "scoreCheck": { "true": [ [ { "node": "generateOffer", "type": "main", "index": 0 }, { "node": "getInsuranceQuote", "type": "main", "index": 0 } ], [ { "node": "appendLog", "type": "main", "index": 0 } ], [ { "node": "sendEmail", "type": "main", "index": 0 }, { "node": "sendWhatsApp", "type": "main", "index": 0 } ] ], "main": [ [ { "node": "appendLog", "type": "main", "index": 0 } ] ] },
+    "generateOffer": { "main": [ [ { "node": "saveTitleToDrive", "type": "main", "index": 0 } ] ] },
+    "getInsuranceQuote": { "main": [ [ { "node": "appendLog", "type": "main", "index": 0 } ] ] },
+    "saveTitleToDrive": { "main": [ [ { "node": "sendEmail", "type": "main", "index": 0 } ] ] },
+    "sendEmail": { "main": [ [ { "node": "sendWhatsApp", "type": "main", "index": 0 } ] ] },
+    "sendWhatsApp": { "main": [ [ { "node": "appendLog", "type": "main", "index": 0 } ] ] },
+    "appendLog": { "main": [ [ { "node": "respond", "type": "main", "index": 0 } ] ] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "13-prop-insure-0001",
+  "meta": { "templateCredsSetup": true }
+}

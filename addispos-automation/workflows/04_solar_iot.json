@@ -1,1 +1,177 @@
-{}
+{
+  "name": "solar_iot",
+  "nodes": [
+    {
+      "parameters": {
+        "topic": "device/+/soc",
+        "brokerUrl": "mqtt://broker.hivemq.com",
+        "options": {}
+      },
+      "id": "a11b22c3-d44e-4f55-9a66-77b88c99d000",
+      "name": "mqttTrigger",
+      "type": "n8n-nodes-base.mqtt",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.soc }}",
+              "operation": "lessThan",
+              "value2": 20
+            }
+          ]
+        }
+      },
+      "id": "b22c33d4-e55f-4g66-8h77-88i99j00k111",
+      "name": "socCheck",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "https://wallet-sandbox.example/api/debit",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ { phone: ($json.phone || $json.billing?.phone || ''), amount: ($json.debitAmount || 50), reason: 'Battery low auto-debit' } }}"
+      },
+      "id": "c33d44e5-f66g-47h7-9i88-99j00k11l222",
+      "name": "walletDebit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "Wallet",
+          "name": "Wallet"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://relay-sandbox.example/api/switch",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ { device: ($json.deviceId || $json.device_id || ''), action: 'off' } }}"
+      },
+      "id": "d44e55f6-g77h-48i8-0j99-00k11l22m333",
+      "name": "switchRelay",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "Relay",
+          "name": "Relay"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://whatsapp-sandbox.example/api/send",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ { to: ($json.phone || $json.billing?.phone || ''), message: 'Battery SOC ' + ($json.soc || '') + '% — relay switched off and a debit of ZAR ' + ($json.debitAmount || 50) + ' was attempted.' } }}"
+      },
+      "id": "e55f66g7-h88i-49j9-1k00-11l22m33n444",
+      "name": "sendWhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "WhatsApp",
+          "name": "WhatsApp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingData",
+        "options": {
+          "responseData": "={{ { status: 'handled', soc: $json.soc || null } }}"
+        }
+      },
+      "id": "f66g77h8-i99j-40k0-2l11-22m33n44o555",
+      "name": "respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "mqttTrigger": {
+      "main": [
+        [
+          {
+            "node": "socCheck",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "socCheck": {
+      "main": [
+        [
+          {
+            "node": "walletDebit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "true": [
+        [
+          {
+            "node": "walletDebit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "walletDebit": {
+      "main": [
+        [
+          {
+            "node": "switchRelay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "switchRelay": {
+      "main": [
+        [
+          {
+            "node": "sendWhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "sendWhatsApp": {
+      "main": [
+        [
+          {
+            "node": "respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "04-solar-iot-0001",
+  "meta": {
+    "templateCredsSetup": true
+  }
+}
+

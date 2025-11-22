@@ -1,1 +1,134 @@
-{}
+{
+  "name": "carbon_mrv",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": [
+          {
+            "item": {
+              "type": "cron",
+              "value": "0 * * * *"
+            }
+          }
+        ]
+      },
+      "id": "s1a2b3c4-d5e6-4111-9001-101112131401",
+      "name": "hourlySchedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{$parameter['iotApiUrl']}}",
+        "method": "GET",
+        "responseFormat": "json",
+        "options": {}
+      },
+      "id": "t2b3c4d5-e6f7-4222-9002-202122232402",
+      "name": "fetchIoT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "functionCode": "// Simple MRV calculation placeholder (Gold Standard style simplified):\n// Input: items from IoT containing per-hour metrics, e.g. { hour, baseline_fuel_kg, measured_fuel_kg }\nconst data = items[0].json || {};\nconst readings = Array.isArray(data) ? data : (data.readings || data.payload || []);\nlet totalBaseline = 0;\nlet totalMeasured = 0;\nfor (const r of readings) {\n  const bf = parseFloat(r.baseline_fuel_kg || r.baseline || 0) || 0;\n  const mf = parseFloat(r.measured_fuel_kg || r.measured || 0) || 0;\n  totalBaseline += bf;\n  totalMeasured += mf;\n}\nconst fuelSavedKg = Math.max(0, totalBaseline - totalMeasured);\n// emission factor (kg CO2e per kg of fuel) — placeholder used for demonstration only\nconst emissionFactor = parseFloat($parameter.emissionFactor) || 1.8;\nconst co2eSavedKg = Math.round(fuelSavedKg * emissionFactor * 100) / 100;\n// create a simple certificate object to mint on-chain\nconst certificate = {\n  id: `CERT-${Date.now()}`,\n  issuedAt: new Date().toISOString(),\n  period: { start: new Date(Date.now() - 3600*1000).toISOString(), end: new Date().toISOString() },\n  metrics: { totalBaselineKg: totalBaseline, totalMeasuredKg: totalMeasured, fuelSavedKg, co2eSavedKg },\n  source: 'iot-cookstove-hourly',\n  notes: 'Simplified MRV calc for demonstration. Replace with Gold Standard formula for production.'\n};\nreturn [{ json: { certificate, donorEmail: $parameter.donorEmail || $parameter['donor_email'] || '', rawReadings: readings } }];"
+      },
+      "id": "u3c4d5e6-f7a8-4333-9003-303132333403",
+      "name": "calcMRV",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{$parameter['mintEndpoint'] || 'https://stellar-mint.example/mint'}}",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={ \n  \"certificate\": $json.certificate\n }"
+      },
+      "id": "v4d5e6f7-a8b9-4444-9004-404142434504",
+      "name": "mintCert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "Stellar",
+          "name": "Stellar mint API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$json.donorEmail || $parameter['donorEmail'] || $parameter['donor_email']}}",
+        "subject": "Your carbon certificate: {{$json.certificate.id}}",
+        "text": "Thank you — your donation has funded avoided emissions of {{$json.certificate.metrics.co2eSavedKg}} kg CO2e. Certificate ID: {{$json.certificate.id}}.\n\nAttached: certificate metadata in the chain.",
+        "options": {}
+      },
+      "id": "w5e6f7g8-b9c0-4555-9005-505152535605",
+      "name": "sendEmail",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "credentials": {
+        "smtp": {
+          "id": "SMTP",
+          "name": "SMTP account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "hourlySchedule": {
+      "main": [
+        [
+          {
+            "node": "fetchIoT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fetchIoT": {
+      "main": [
+        [
+          {
+            "node": "calcMRV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "calcMRV": {
+      "main": [
+        [
+          {
+            "node": "mintCert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "mintCert": {
+      "main": [
+        [
+          {
+            "node": "sendEmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "10-carbon-mrv-0001",
+  "meta": {
+    "templateCredsSetup": true
+  }
+}
+

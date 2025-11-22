@@ -1,0 +1,153 @@
+{
+  "name": "salary_advance",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "12-salary",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "n1a2b3c4-d5e6-4111-9001-121314151201",
+      "name": "webhookTrigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{$json.csvUrl}}",
+        "method": "GET",
+        "responseFormat": "string",
+        "options": {}
+      },
+      "id": "n2b3c4d5-e6f7-4222-9002-131415161302",
+      "name": "fetchCsv",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "binaryPropertyName": "",
+        "options": {
+          "rawCSV": true,
+          "delimiter": ",",
+          "headerRow": true
+        }
+      },
+      "id": "n3c4d5e6-f7a8-4333-9003-141516171403",
+      "name": "parseCsv",
+      "type": "n8n-nodes-base.spreadsheetFileToJson",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "functionCode": "// Calculate 10% advance per row and filter by cap (<50% net-pay).\nconst rows = items.map(i=>i.json || {});\nconst out = [];\nfor (const r of rows) {\n  const netRaw = r.net_pay || r['Net Pay'] || r.net || r.netpay || r.Net || 0;\n  const net = parseFloat(('' + netRaw).replace(/[, ]+/g,'')) || 0;\n  if (net <= 0) continue;\n  const advance = Math.round(net * 0.10 * 100) / 100;\n  const cap = net * 0.5;\n  if (advance > cap) {\n    // skip (shouldn't happen with 10%) but keep for safety\n    continue;\n  }\n  // prepare transfer payload fields expected by Flutterwave (example)\n  const phone = r.phone || r.mobile || r.msisdn || r.Phone || r['Phone Number'] || '';\n  const name = r.employee || r.name || r.Employee || '';\n  out.push({ json: { employeeName: name, phone, netPay: net, advanceAmount: advance, currency: r.currency || 'ZAR' } });\n}\nreturn out;"
+      },
+      "id": "n4d5e6f7-a8b9-4444-9004-151617181504",
+      "name": "calcAdvance",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{$parameter['flutterwaveTransferUrl'] || 'https://api.flutterwave.com/v3/transfers'}}",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "headerParametersJson": "={ \"Authorization\": `Bearer ${$env.FLUTTERWAVE_SECRET_KEY}`, \"Content-Type\": \"application/json\" }",
+        "bodyParametersJson": "={ \n  \"account_bank\": $json.phone,\n  \"account_number\": $json.phone,\n  \"amount\": $json.advanceAmount,\n  \"currency\": $json.currency || 'ZAR',\n  \"recipient_name\": $json.employeeName\n }"
+      },
+      "id": "n5e6f7g8-b9c0-4555-9005-161718191605",
+      "name": "transfer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{$parameter['smsGatewayUrl'] || 'https://sms-gateway.example/send'}}",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "headerParametersJson": "={ \"Authorization\": `Bearer ${$env.SMS_API_KEY}`, \"Content-Type\": \"application/json\" }",
+        "bodyParametersJson": "={ \n  \"to\": $json.phone,\n  \"message\": `You have received an advance of ${$json.advanceAmount} ${$json.currency}. Please visit https://addispos.com/advance-contract to sign the contract.`\n }"
+      },
+      "id": "n6f7g8h9-c0d1-4666-9006-171819201706",
+      "name": "sendSms",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "={{$parameter['GOOGLE_SHEETS_ADVANCES_ID'] || $env.GOOGLE_SHEETS_ADVANCES_ID || $parameter.sheetId}}",
+        "range": "Advances!A:G",
+        "options": {
+          "valueInputMode": "USER_ENTERED"
+        },
+        "dataMapping": {
+          "mappingMode": "manual",
+          "schema": [
+            { "key": "employee", "value": "={{$json.employeeName}}" },
+            { "key": "phone", "value": "={{$json.phone}}" },
+            { "key": "netPay", "value": "={{$json.netPay}}" },
+            { "key": "advance", "value": "={{$json.advanceAmount}}" },
+            { "key": "currency", "value": "={{$json.currency}}" },
+            { "key": "transferStatus", "value": "={{$json.status || $json.response || 'pending'}}" },
+            { "key": "timestamp", "value": "={{ new Date().toISOString() }}" }
+          ],
+          "autoMapField": false
+        }
+      },
+      "id": "n7g8h9i0-d1e2-4777-9007-181920212807",
+      "name": "appendSheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "credentials": {
+        "googleApi": {
+          "id": "Google",
+          "name": "Google service account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Summarize how many advances were processed\nconst count = items.length || 0;\nreturn [{ json: { advanced: count } }];"
+      },
+      "id": "n8h9i0j1-e2f3-4888-9008-192021222908",
+      "name": "summarize",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "responseCode": 200,
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "n9i0j1k2-f3g4-4999-9009-202122232009",
+      "name": "respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "webhookTrigger": {
+      "main": [
+        [
+          { "node": "fetchCsv", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "fetchCsv": { "main": [ [ { "node": "parseCsv", "type": "main", "index": 0 } ] ] },
+    "parseCsv": { "main": [ [ { "node": "calcAdvance", "type": "main", "index": 0 } ] ] },
+    "calcAdvance": { "main": [ [ { "node": "transfer", "type": "main", "index": 0 } ] ] },
+    "transfer": { "main": [ [ { "node": "sendSms", "type": "main", "index": 0 } ] ] },
+    "sendSms": { "main": [ [ { "node": "appendSheet", "type": "main", "index": 0 } ] ] },
+    "appendSheet": { "main": [ [ { "node": "summarize", "type": "main", "index": 0 } ] ] },
+    "summarize": { "main": [ [ { "node": "respond", "type": "main", "index": 0 } ] ] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "12-salary-advance-0001",
+  "meta": { "templateCredsSetup": true }
+}

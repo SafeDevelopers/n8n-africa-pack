@@ -1,1 +1,172 @@
-{}
+{
+  "name": "agri_outgrower",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "05-agri-ussd",
+        "options": {}
+      },
+      "id": "5a1f2b3c-4d5e-6f70-8a9b-c0d1e2f3a456",
+      "name": "webhookTrigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "=https://weather-sandbox.example/api/forecast?farmerId={{$json.farmerId}}",
+        "method": "GET",
+        "responseFormat": "json",
+        "options": {}
+      },
+      "id": "6b2f3c4d-5e6f-7081-9a0b-c1d2e3f4b567",
+      "name": "getWeather",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "functionCode": "// Compute a simple credit score placeholder based on weather and acreage\nconst itemsOut = [];\nfor (const it of items) {\n  const data = it.json;\n  // example inputs: data.acreage, data.weather (from previous node)\n  const acreage = parseFloat(data.acreage || 0);\n  const rainForecast = (data.weather && data.weather.forecast && data.weather.forecast.rainProbability) ? parseFloat(data.weather.forecast.rainProbability) : 50;\n  // simple scoring: higher rainProbability and smaller acreage -> higher score\n  let score = Math.max(0, Math.min(100, Math.round((rainForecast * 0.6) + ((100 - Math.min(100, acreage)) * 0.4))));\n  data.creditScore = score;\n  itemsOut.push({ json: data });\n}\nreturn itemsOut;"
+      },
+      "id": "7c3d4e5f-6a7b-8192-0b1c-d2e3f4a5c678",
+      "name": "creditScore",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "functionCode": "// Generate a simple PDF contract as binary data (placeholder)\nconst itemsOut = [];\nfor (const it of items) {\n  const data = it.json;\n  const content = `Offtake Contract for Farmer ${data.farmerId || ''}\nAcreage: ${data.acreage || ''}\nCredit Score: ${data.creditScore || ''}`;\n  const buffer = Buffer.from(content, 'utf8');\n  it.binary = it.binary || {};\n  it.binary.contractPdf = {\n    data: buffer.toString('base64'),\n    fileName: `ofcontract_${data.farmerId || Date.now()}.pdf`,\n    mimeType: 'application/pdf'\n  };\n  itemsOut.push(it);\n}\nreturn itemsOut;"
+      },
+      "id": "8d4e5f6a-7b8c-9203-1c2d-e3f4a5b6d789",
+      "name": "generateContract",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "binaryPropertyName": "contractPdf",
+        "fileName": "={{ `ofcontract_${$json.farmerId || Date.now()}.pdf` }}",
+        "parents": "={{$parameter['folderId'] || ''}}"
+      },
+      "id": "9e5f6a7b-8c9d-0314-2d3e-f4a5b6c7e890",
+      "name": "savePdf",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 1,
+      "credentials": {
+        "googleApi": {
+          "id": "Google",
+          "name": "Google service account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://whatsapp-sandbox.example/api/send",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ { to: ($json.phone || $json.msisdn || ''), mediaUrl: $node[\"savePdf\"].json.webViewLink || $node[\"savePdf\"].json.id || '', caption: 'Your offtake contract' } }}"
+      },
+      "id": "af6a7b8c-9d0e-1425-3e4f-a5b6c7d8f901",
+      "name": "sendWhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "WhatsApp",
+          "name": "WhatsApp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingData",
+        "options": {
+          "responseData": "={{ { status: 'ok', farmerId: $json.farmerId || null, contract: $node[\"savePdf\"].json } }}"
+        }
+      },
+      "id": "bf7b8c9d-0e1f-2536-4f5a-b6c7d8e9f012",
+      "name": "respondWebhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "webhookTrigger": {
+      "main": [
+        [
+          {
+            "node": "getWeather",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "getWeather": {
+      "main": [
+        [
+          {
+            "node": "creditScore",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "creditScore": {
+      "main": [
+        [
+          {
+            "node": "generateContract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "generateContract": {
+      "main": [
+        [
+          {
+            "node": "savePdf",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "savePdf": {
+      "main": [
+        [
+          {
+            "node": "sendWhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "sendWhatsApp": {
+      "main": [
+        [
+          {
+            "node": "respondWebhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "05-agri-outgrower-0001",
+  "meta": {
+    "templateCredsSetup": true
+  }
+}
+

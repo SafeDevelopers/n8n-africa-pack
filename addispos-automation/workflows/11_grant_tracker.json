@@ -1,1 +1,224 @@
-{}
+{
+  "name": "grant_tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": [
+          {
+            "item": {
+              "type": "cron",
+              "value": "0 8 * * *"
+            }
+          }
+        ]
+      },
+      "id": "a1b2c3d4-e5f6-5111-9001-111213141501",
+      "name": "dailySchedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "functionCode": "// Return portal URLs to scrape as individual items\\nconst portals = [\\n  { name: 'DTI', url: $parameter.dtiUrl || 'https://www.gov.za/dti/opportunities' },\\n  { name: 'NEPAD', url: $parameter.nepadUrl || 'https://www.nepad.org/opportunities' },\\n  { name: 'AU', url: $parameter.auUrl || 'https://au.int/en/opportunities' }\\n];\\nreturn portals.map(p => ({ json: p }));"
+      },
+      "id": "b2c3d4e5-f6a7-5222-9002-222324252602",
+      "name": "getPortals",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{$json.url}}",
+        "method": "GET",
+        "responseFormat": "string",
+        "options": {}
+      },
+      "id": "c3d4e5f6-a7b8-5333-9003-333435363703",
+      "name": "fetchPage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse HTML and extract listings. Uses cheerio if available, else simple regex fallback.\\nconst html = items[0].json.body || items[0].json;\\nlet cheerioLoaded = false;\\nlet $ = null;\\ntry { $ = require('cheerio'); cheerioLoaded = true; } catch(e) { cheerioLoaded = false; }\\nconst results = [];\\nif (cheerioLoaded) {\\n  const doc = $.load(html); doc('a').each((i, el) => { const text = doc(el).text().trim(); const href = doc(el).attr('href'); if (!text) return; if (/call|opportunit|grant|funding/i.test(text)) { results.push({ title: text, url: href && href.startsWith('http') ? href : new URL(href || '', items[0].json.requestUrl || items[0].json.url).href }); } });\\n} else {\\n  const re = /<a[^>]*href=\\\"([^\\\"]+)\\\"[^>]*>([^<]{5,200}?(call|opportunit|grant|fund))/ig;\\n  let m;\\n  while ((m = re.exec(html))) { try { results.push({ title: m[2].replace(/<[^>]+>/g, '').trim(), url: m[1] }); } catch(e){} }\\n}\\nreturn results.map(r => ({ json: { portal: $json.name || $json.portalName || items[0].json.name, title: r.title, url: r.url } }));"
+      },
+      "id": "d4e5f6g7-b8c9-5444-9004-444546474804",
+      "name": "parseListings",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "sheetId": "={{$parameter['sheetId']}}",
+        "range": "Calls!A:C",
+        "options": {}
+      },
+      "id": "e5f6g7h8-c9d0-5555-9005-555657585905",
+      "name": "getExisting",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "credentials": {
+        "googleApi": {
+          "id": "Google",
+          "name": "Google service account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Compare parsed listings to existing sheet entries (by URL or title) and keep only new ones\\nconst listings = items.map(i=>i.json).filter(Boolean);\\nconst existingRows = $node['getExisting'].json || [];\\nconst existingSet = new Set(existingRows.map(r => (r[1] || r[0] || '').toString()));\\nconst newItems = [];\\nfor (const l of listings) { const key = (l.url || l.title || '').toString(); if (!existingSet.has(key)) newItems.push(l); }\\nreturn newItems.map(n => ({ json: n }));"
+      },
+      "id": "f6g7h8i9-d0e1-5666-9006-666768798006",
+      "name": "filterNew",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "={{$parameter['slackWebhook'] || 'https://hooks.slack.com/services/T/HOOK/URL'}}",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={ \\\n+  \"text\": `New grant call detected on ${$json.portal || 'portal'}: *${$json.title}*\\n<${$json.url}|Open link>`\\n }"
+      },
+      "id": "g7h8i9j0-e1f2-5777-9007-777879808107",
+      "name": "notifySlack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "={{$parameter['sheetId']}}",
+        "range": "Calls!A:C",
+        "options": {
+          "valueInputMode": "USER_ENTERED"
+        },
+        "dataMapping": {
+          "mappingMode": "manual",
+          "schema": [
+            { "key": "url", "value": "={{$json.url}}" },
+            { "key": "title", "value": "={{$json.title}}" },
+            { "key": "portal", "value": "={{$json.portal}}" }
+          ],
+          "autoMapField": false
+        }
+      },
+      "id": "h8i9j0k1-f2g3-5888-9008-888980909208",
+      "name": "appendSheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "credentials": {
+        "googleApi": {
+          "id": "Google",
+          "name": "Google service account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "prompt": "Write a concise grant application draft for the following call:\\nTitle: {{$json.title}}\\nPortal: {{$json.portal}}\\nURL: {{$json.url}}\\n\\nInclude: 1) one-paragraph problem statement, 2) proposed intervention (3 bullets), 3) expected impact metrics (2 bullets), 4) short budget note (1-2 sentences).",
+        "options": {}
+      },
+      "id": "i9j0k1l2-g3h4-5999-9009-999091010309",
+      "name": "draftApp",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "credentials": {
+        "openAiApi": {
+          "id": "OpenAi",
+          "name": "OpenAI"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "dailySchedule": {
+      "main": [
+        [
+          {
+            "node": "getPortals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "getPortals": {
+      "main": [
+        [
+          {
+            "node": "fetchPage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fetchPage": {
+      "main": [
+        [
+          {
+            "node": "parseListings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parseListings": {
+      "main": [
+        [
+          {
+            "node": "getExisting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "getExisting": {
+      "main": [
+        [
+          {
+            "node": "filterNew",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "filterNew": {
+      "main": [
+        [
+          {
+            "node": "notifySlack",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "appendSheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "draftApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "11-grant-tracker-0001",
+  "meta": {
+    "templateCredsSetup": true
+  }
+}
+

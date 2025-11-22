@@ -1,16 +1,10 @@
 <template>
-  <div id="app">
-    <h1>Addispos Automation (PWA)</h1>
-    <AlertBox message="Frontend scaffold is ready." />
-  </div>
+  <h1>AddisPOS Automation Hub</h1>
+  <TriggerWf/>
+  <AlertBox/>
 </template>
 
-<script>
-import AlertBox from './components/AlertBox.vue'
-export default { components: { AlertBox } }
+<script setup>
+import TriggerWf from './components/TriggerWf.vue'
+import AlertBox  from './components/AlertBox.vue'
 </script>
-
-<style>
-body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
-#app { padding: 1rem; }
-</style>

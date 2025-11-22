@@ -1,13 +1,15 @@
 <template>
-  <div class="alert">{{ message }}</div>
+  <h2>Public-service alerts</h2>
+  <button @click="load">Refresh</button>
+  <pre>{{ list }}</pre>
 </template>
 
-<script>
-export default {
-  props: { message: { type: String, default: '' } }
+<script setup>
+import { ref } from 'vue'
+import { alerts } from '../api.js'
+const list = ref('')
+const load = async () => {
+  const { data } = await alerts()
+  list.value = JSON.stringify(data, null, 2)
 }
 </script>
-
-<style scoped>
-.alert { background:#f0f4ff; border:1px solid #cfe0ff; padding:0.5rem 1rem; border-radius:6px }
-</style>
