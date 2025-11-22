@@ -1,0 +1,110 @@
+{
+  "name": "ETH_Outage_Health_Alert",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "hours", "hoursInterval": 1 }] } },
+      "id": "cron",
+      "name": "Every_hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "url": "https://www.eepco.gov.et/interruption",
+        "options": { "timeout": 8000 }
+      },
+      "id": "fetch_eepco",
+      "name": "GET_EEPCo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1
+    },
+    {
+      "parameters": {
+        "url": "https://www.ewss.gov.et/water disruption",
+        "options": { "timeout": 8000 }
+      },
+      "id": "fetch_ewss",
+      "name": "GET_EWSS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1
+    },
+    {
+      "parameters": {
+        "url": "https://www.moh.gov.et/healthalert",
+        "options": { "timeout": 8000 }
+      },
+      "id": "fetch_moh",
+      "name": "GET_MoH",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            { "value1": "={{$json.body}}", "operation": "contains", "value2": "power interruption" }
+          ]
+        }
+      },
+      "id": "if_power",
+      "name": "Power?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "chatId": "={{$parameter['chatId']}}",
+        "text": "🔌 EEPCo outage detected: {{ $('GET_EEPCo').item.body | slice:0:200 }}"
+      },
+      "id": "wa_power",
+      "name": "WhatsApp_Power",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "credentials": { "whatsAppApi": { "id": "WhatsApp", "name": "WhatsApp account" } }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$parameter['chatId']}}",
+        "text": "💧 Water disruption: {{ $('GET_EWSS').item.body | slice:0:200 }}"
+      },
+      "id": "wa_water",
+      "name": "WhatsApp_Water",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "chatId": "={{$parameter['chatId']}}",
+        "text": "🏥 Health alert: {{ $('GET_MoH').item.body | slice:0:200 }}"
+      },
+      "id": "wa_health",
+      "name": "WhatsApp_Health",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "1BxiMVe0sdZ8j5R5rXxXxXxXxXxXxXxX",
+        "range": "Alerts!A:E",
+        "options": { "valueInputMode": "USER_ENTERED" }
+      },
+      "id": "log_sheet",
+      "name": "GoogleSheet_Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.1,
+      "credentials": { "googleApi": { "id": "Google", "name": "Google service account" } }
+    }
+  ],
+  "connections": {
+    "Every_hour": { "main": [ [ { "node": "GET_EEPCo", "type": "main", "index": 0 } ] ] },
+    "GET_EEPCo": { "main": [ [ { "node": "GET_EWSS", "type": "main", "index": 0 } ] ] },
+    "GET_EWSS": { "main": [ [ { "node": "GET_MoH", "type": "main", "index": 0 } ] ] },
+    "GET_MoH": { "main": [ [ { "node": "Power?", "type": "main", "index": 0 } ] ] },
+    "Power?": { "main": [ [ { "node": "WhatsApp_Power", "type": "main", "index": 0 } ], [ { "node": "WhatsApp_Water", "type": "main", "index": 0 } ] ] },
+    "WhatsApp_Power": { "main": [ [ { "node": "GoogleSheet_Log", "type": "main", "index": 0 } ] ] },
+    "WhatsApp_Water": { "main": [ [ { "node": "GoogleSheet_Log", "type": "main", "index": 0 } ] ] },
+    "WhatsApp_Health": { "main": [ [ { "node": "GoogleSheet_Log", "type": "main", "index": 0 } ] ] }
+  },
+  "meta": { "templateCredsSetup": true }
+}
