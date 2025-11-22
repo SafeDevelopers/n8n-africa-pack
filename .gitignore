@@ -7,3 +7,8 @@ dist/
 
 # Logs
 npm-debug.log*
+
+# Environment examples (may contain secrets)
+.env
+.env.example
+addispos-automation/workflows/.env.example
